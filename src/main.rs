@@ -1,14 +1,11 @@
 #![feature(advanced_slice_patterns, slice_patterns)]
 extern crate serial;
 
-use std::env;
 use std::time::Duration;
 use std::vec::Vec;
-use std::iter;
 
 use std::io::prelude::*;
 use serial::prelude::*;
-
 
 const SETTINGS: serial::PortSettings = serial::PortSettings {
     baud_rate:    serial::Baud19200,
@@ -17,8 +14,6 @@ const SETTINGS: serial::PortSettings = serial::PortSettings {
     stop_bits:    serial::Stop1,
     flow_control: serial::FlowNone
 };
-
-
 
 struct Port {
     port_impl: serial::SystemPort,
@@ -37,20 +32,23 @@ impl Port {
     }
 
     pub fn setup(&mut self) {
-        (self.port_impl.configure(&SETTINGS));
-        (self.port_impl.set_timeout(Duration::from_millis(1000)));
+        match self.port_impl.configure(&SETTINGS) {
+            Ok(_) => println!("successfully configured the serial port"),
+            Err(err) => panic!("unable to configure the serial port: {:?}", err),
+        };
+
+        match self.port_impl.set_timeout(Duration::from_millis(1000)) {
+            Ok(_) => println!("successfully changed the timeout value for the serial port"),
+            Err(err) => panic!("unable to change the timeout value for the serial port: {:?}", err),
+        };
     }
 }
 
-// Implement `Iterator` for `Fibonacci`.
+// Implement `Iterator` for `Port`.
 // The `Iterator` trait only requires a method to be defined for the `next` element.
 impl Iterator for Port {
     type Item = u8;
 
-    // Here, we define the sequence using `.curr` and `.next`.
-    // The return type is `Option<T>`:
-    //     * When the `Iterator` is finished, `None` is returned.
-    //     * Otherwise, the next value is wrapped in `Some` and returned.
     fn next(&mut self) -> Option<u8> {
         loop {
             match self.port_impl.read(&mut self.buf[..]) {
@@ -62,43 +60,46 @@ impl Iterator for Port {
 }
 
 fn print_cmd(port: &mut Port) -> Vec<u8> {
-    let commandStart :u8 = 2;
-    port.take_while(|x| x != &commandStart).collect::<Vec<_>>()
+    const COMMAND_START :u8 = 0x02;
+
+    const STANDARD_MSG :u8 = 0x50;
+    const EXTENDED_MSG :u8 = 0x51;
+    const X10_RECEIVED :u8 = 0x52;
+    const ALL_LINKING_COMPLETED :u8 = 0x53;
+    const BUTTON_EVENT_REPORT :u8 = 0x54;
+    const USER_RESET_DETECTED :u8 = 0x55;
+
+    port.skip_while(|x| x != &COMMAND_START).next();
+
+    let command_type :u8 = port.take(1).next().unwrap();
+    println!("commandType {:02X}", &command_type);
+
+    match command_type {
+        STANDARD_MSG => port.take(9).collect::<Vec<_>>(),
+        EXTENDED_MSG => port.take(23).collect::<Vec<_>>(),
+        X10_RECEIVED => port.take(23).collect::<Vec<_>>(),
+        ALL_LINKING_COMPLETED => port.take(8).collect::<Vec<_>>(),
+        BUTTON_EVENT_REPORT => port.take(1).collect::<Vec<_>>(),
+        USER_RESET_DETECTED => vec![],
+        _ => vec![],
+    }
+
 }
 
 pub fn to_hex_string(bytes: Vec<u8>) -> String {
-    let strs: Vec<String> = bytes.iter()
+    let strings: Vec<String> = bytes.iter()
         .map(|b| format!("{:02X}", b))
         .collect();
-    strs.connect(" ")
+    strings.join(" ")
 }
 
 
 fn main() {
-
     let port_path = String::from("/dev/ttyUSB0");
     let mut port = Port::new(port_path);
 
     loop {
         let cmd = print_cmd(&mut port);
-        let RCV_STD_MSG : u8 = 0x50;
-
-        match cmd.as_slice() {
-            &[RCV_STD_MSG,
-                from_high, from_mid, from_low,
-                to_high, to_mid, to_low,
-                msg_flags, msg_1, msg_2
-            ] => {
-                println!("INSTEON Standard Message Received (0x50)");
-                println!("From:        {}", to_hex_string(vec![from_high, from_mid, from_low]));
-                println!("To:          {}", to_hex_string(vec![to_high, to_mid, to_low]));
-                println!("Msg Flags:   {}", to_hex_string(vec![msg_flags]));
-                println!("Msg:         {}", to_hex_string(vec![msg_1, msg_2]));
-
-            },
-            _   => println!("Not implemented")
-        }
-
-        //println!("{:?}", to_hex_string(cmd))
+        println!("cmd {}", to_hex_string(cmd));
     }
 }
