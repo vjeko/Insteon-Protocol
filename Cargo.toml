@@ -5,3 +5,4 @@ authors = ["vjeko"]
 
 [dependencies]
 serial = "0.3"
+num = "0.1"
