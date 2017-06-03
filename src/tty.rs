@@ -30,6 +30,10 @@ impl Port {
         return port
     }
 
+    pub fn send(&mut self, buf: &[u8]) {
+        self.port_impl.write(buf);
+    }
+
     pub fn setup(&mut self) {
         match self.port_impl.configure(&SETTINGS) {
             Ok(_) => println!("successfully configured the serial port"),

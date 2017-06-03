@@ -11,6 +11,12 @@ pub enum InsteonMsg {
         cmd2: u8,
     },
 
+    SendStandardMsg {
+        addr_to: [u8; 3],
+        msg_flags: u8,
+        cmd1: u8,
+        cmd2: u8,
+    },
 
     ExtendedMsg {
         addr_from: [u8; 3],

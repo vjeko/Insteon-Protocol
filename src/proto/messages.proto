@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+message Event {
+
+  string device = 1;
+
+  enum EventType {
+    SWITCH_OPEN = 0;
+    SWITCH_CLOSED = 1;
+  }
+
+  EventType type = 2;
+}
+
+message LightControl {
+  string device = 1;
+  uint32 level = 2;
+}
+
+message Ack { }
+
+message CmdMsg {
+  oneof cmd {
+    LightControl lightControl = 1;
+  }
+}
+
+service VinsteonRPC {
+  rpc SendCmd(CmdMsg) returns (Ack) {}
+}
