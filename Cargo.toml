@@ -4,5 +4,9 @@ version = "0.1.0"
 authors = ["vjeko"]
 
 [dependencies]
-serial = "0.3"
 num = "0.1"
+tokio-serial = "0.5"
+tokio-core = "0.1"
+tokio-io = "0.1"
+futures = "0.1.14"
+bytes = "0.4"
