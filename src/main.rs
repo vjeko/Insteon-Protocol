@@ -13,6 +13,8 @@ use std::{io, str};
 use std::{thread, time};
 use std::sync::mpsc;
 use std::time::Duration;
+use std::sync::Mutex;
+use std::sync::Arc;
 
 use tokio_core::reactor::Core;
 use tokio_io::codec::{Decoder, Encoder};
@@ -90,18 +92,59 @@ fn main() {
 
     let printer = reader.for_each(|s| {
         println!("CMD: {:?}", s);
-
-        std::thread::sleep(time::Duration::from_secs(2));
-        let on = vec![0x02, 0x62, 65, 29, 30, 64, 17, 1];
-        writer.start_send(on);
-        writer.poll_complete();
-
-        std::thread::sleep(time::Duration::from_secs(2));
-        let off = vec![0x02, 0x62, 65, 29, 30, 64, 19, 1];
-        writer.start_send(off);
-        writer.poll_complete();
-
         Ok(())
+    });
+
+    let original = Arc::new(Mutex::new(writer));
+
+    let remote = core.remote();
+
+    // Create a thread that performs some work.
+    thread::spawn(move || {
+        loop {
+            // INSERT WORK HERE - the work should be modeled as having a _future_ result.
+            let www1 = original.clone();
+            let www2 = original.clone();
+
+            // In this fake example, we do not care about the values of the `Ok` and `Err`
+            // variants. thus, we can use `()` for both.
+            // Note: `::futures::done()` will be called ::futures::result() in later
+            // versions of the future crate.
+
+            let f = ::futures::done::<(), ()>(Ok(()));
+            // END WORK
+
+            // `remote.spawn` accepts a closure with a single parameter of type `&Handle`.
+            // In this example, the `&Handle` is not needed. The future returned from the
+            // closure will be executed.
+            //
+            // Note: We must use `remote.spawn()` instead of `handle.spawn()` because the
+            // Core was created on a different thread.
+            std::thread::sleep(time::Duration::from_secs(1));
+
+            remote.spawn(move |_| {
+                let mut wr = www1.lock().expect("Unable to lock output");
+
+                //let on = vec![0x02, 0x62, 65, 29, 30, 15, 0x12, 255];
+                let on = vec![0x02, 0x62, 0x1A, 0xD0, 0xF4, 15, 0x12, 255];
+                wr.start_send(on);
+                wr.poll_complete();
+                Ok(())
+            });
+
+            std::thread::sleep(time::Duration::from_secs(1));
+
+            remote.spawn(move |_| {
+                let mut wr = www2.lock().expect("Unable to lock output");
+
+                //let off = vec![0x02, 0x62, 65, 29, 30, 15, 0x14, 0];
+                let off = vec![0x02, 0x62, 0x1A, 0xD0, 0xF4, 15, 0x14, 0];
+
+                wr.start_send(off);
+                wr.poll_complete();
+                Ok(())
+            });
+        }
     });
 
     core.run(printer).unwrap();

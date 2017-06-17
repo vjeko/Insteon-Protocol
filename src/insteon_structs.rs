@@ -111,6 +111,9 @@ impl InsteonMsg {
             EXTENDED_MSG => {
                 const MSG_SIZE : usize = 23;
                 let v : Vec<u8> = current.take(MSG_SIZE).collect();
+                if buf_size < MSG_SIZE {
+                    return None
+                }
 
                 Some((InsteonMsg::ExtendedMsg {
                     addr_from : [v[0], v[1], v[2]],
@@ -127,6 +130,9 @@ impl InsteonMsg {
             X10_RECEIVED => {
                 const MSG_SIZE : usize = 2;
                 let v : Vec<u8> = current.take(MSG_SIZE).collect();
+                if buf_size < MSG_SIZE {
+                    return None
+                }
 
                 Some((InsteonMsg::X10Received{
                     raw_x10 : v[0],
@@ -137,6 +143,9 @@ impl InsteonMsg {
             ALL_LINKING_COMPLETED => {
                 const MSG_SIZE : usize = 8;
                 let v : Vec<u8> = current.take(MSG_SIZE).collect();
+                if buf_size < MSG_SIZE {
+                    return None
+                }
 
                 Some((InsteonMsg::AllLinkingCompleted{
                     link_code: v[0],
@@ -152,6 +161,9 @@ impl InsteonMsg {
             BUTTON_EVENT_REPORT => {
                 const MSG_SIZE : usize = 1;
                 let v : Vec<u8> = current.take(MSG_SIZE).collect();
+                if buf_size < MSG_SIZE {
+                    return None
+                }
 
                 Some((InsteonMsg::ButtonEventReport {
                     button_event : v[0],
@@ -166,6 +178,9 @@ impl InsteonMsg {
             ALL_LINK_CLEANUP_FAILURE_REPORT => {
                 const MSG_SIZE : usize = 1;
                 let v : Vec<u8> = current.take(MSG_SIZE).collect();
+                if buf_size < MSG_SIZE {
+                    return None
+                }
 
                 Some((InsteonMsg::AllLinkCleanupFailureReport {
                     x01: v[0],
@@ -177,6 +192,9 @@ impl InsteonMsg {
             ALL_LINK_RECORD_RESPONSE => {
                 const MSG_SIZE : usize = 8;
                 let v: Vec<u8> = current.take(MSG_SIZE).collect();
+                if buf_size < MSG_SIZE {
+                    return None
+                }
 
                 Some((InsteonMsg::AllLinkRecordResponse {
                     all_link_record_flags: v[0],
@@ -189,6 +207,9 @@ impl InsteonMsg {
             ALL_LINK_CLEANUP_STATUS_REPORT => {
                 const MSG_SIZE : usize = 1;
                 let v : Vec<u8> = current.take(MSG_SIZE).collect();
+                if buf_size < MSG_SIZE {
+                    return None
+                }
 
                 Some((InsteonMsg::AllLinkCleanupStatusReport {
                     status_byte : v[0],
@@ -198,6 +219,9 @@ impl InsteonMsg {
             SEND_STANDARD_MSG => {
                 const MSG_SIZE : usize = 6;
                 let v : Vec<u8> = current.take(6).collect();
+                if buf_size < MSG_SIZE {
+                    return None
+                }
 
                 Some((InsteonMsg::SendStandardMsg {
                     addr_to : [v[0], v[1], v[2]],
