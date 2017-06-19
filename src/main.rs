@@ -2,12 +2,17 @@
 #![feature(mpsc_select)]
 
 pub mod insteon_structs;
+pub mod messages_grpc;
+pub mod messages;
 
-extern crate futures;
 extern crate tokio_serial;
 extern crate tokio_core;
 extern crate tokio_io;
 extern crate bytes;
+extern crate protobuf;
+extern crate grpc;
+extern crate futures;
+extern crate futures_cpupool;
 
 use std::{io, str};
 use std::{thread, time};
@@ -28,8 +33,11 @@ use futures::stream::SplitSink;
 use futures::Sink;
 use futures::sink::Send;
 use futures::Future;
+use futures_cpupool::CpuPool;
 
 use insteon_structs::*;
+use messages_grpc::*;
+use messages::*;
 
 pub struct LineCodec;
 
@@ -58,6 +66,8 @@ impl Decoder for LineCodec {
     }
 }
 
+struct VinsteonRpcImpl;
+
 impl Encoder for LineCodec {
     type Item = Vec<u8>;
     type Error = io::Error;
@@ -65,6 +75,14 @@ impl Encoder for LineCodec {
     fn encode(&mut self, _item: Self::Item, _dst: &mut BytesMut) -> Result<(), Self::Error> {
         _dst.extend_from_slice(&_item);
         Ok(())
+    }
+}
+
+impl VinsteonRPC for VinsteonRpcImpl {
+    fn send_cmd(&self, _m: grpc::RequestOptions, req: CmdMsg) -> grpc::SingleResponse<Ack> {
+        let mut r = Ack::new();
+        println!("greeting request",);
+        grpc::SingleResponse::completed(r)
     }
 }
 
@@ -98,6 +116,15 @@ fn main() {
     let original = Arc::new(Mutex::new(writer));
 
     let remote = core.remote();
+
+    thread::spawn(move || {
+        let _server = VinsteonRPCServer::new_pool(
+            "[::]:50051", Default::default(), VinsteonRpcImpl, CpuPool::new(2));
+
+        loop {
+            thread::park();
+        }
+    });
 
     // Create a thread that performs some work.
     thread::spawn(move || {
