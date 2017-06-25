@@ -1,10 +1,10 @@
 #![feature(advanced_slice_patterns, slice_patterns)]
-#![feature(mpsc_select)]
 
 pub mod insteon_structs;
 pub mod messages_grpc;
 pub mod messages;
 
+#[macro_use] extern crate log;
 extern crate tokio_serial;
 extern crate tokio_core;
 extern crate tokio_io;
@@ -15,8 +15,7 @@ extern crate futures;
 extern crate futures_cpupool;
 
 use std::{io, str};
-use std::{thread, time};
-use std::sync::mpsc;
+use std::thread;
 use std::time::Duration;
 use std::sync::Mutex;
 use std::sync::Arc;
@@ -29,9 +28,8 @@ use tokio_serial::*;
 use bytes::BytesMut;
 
 use futures::stream::Stream;
-use futures::stream::SplitSink;
 use futures::Sink;
-use futures::sink::Send;
+use futures::sync::mpsc;
 use futures::Future;
 use futures_cpupool::CpuPool;
 
@@ -66,33 +64,23 @@ impl Decoder for LineCodec {
     }
 }
 
-struct VinsteonRpcImpl;
-
 impl Encoder for LineCodec {
     type Item = Vec<u8>;
     type Error = io::Error;
 
     fn encode(&mut self, _item: Self::Item, _dst: &mut BytesMut) -> Result<(), Self::Error> {
-        _dst.extend_from_slice(&_item);
         Ok(())
     }
 }
-
-impl VinsteonRPC for VinsteonRpcImpl {
-    fn send_cmd(&self, _m: grpc::RequestOptions, req: CmdMsg) -> grpc::SingleResponse<Ack> {
-        let mut r = Ack::new();
-        println!("greeting request",);
-        grpc::SingleResponse::completed(r)
-    }
-}
-
 
 fn main() {
 
     let mut core = Core::new().unwrap();
     let handle = core.handle();
+    const DEFAULT_TTY_PATH: &str = "/dev/ttyUSB0";
 
-    let tty_path = "/dev/ttyUSB0";
+
+    let tty_path = DEFAULT_TTY_PATH;
     let settings = SerialPortSettings {
         baud_rate: BaudRate::Baud19200,
         data_bits: DataBits::Eight,
@@ -106,72 +94,93 @@ fn main() {
     let mut port = tokio_serial::Serial::from_path(tty_path, &settings, &handle).unwrap();
     port.set_exclusive(false).expect("Unable to set serial port exclusive");
 
-    let (mut writer, reader) = port.framed(LineCodec).split();
+    let (writer, reader) = port.framed(LineCodec).split();
 
     let printer = reader.for_each(|s| {
         println!("CMD: {:?}", s);
         Ok(())
     });
 
-    let original = Arc::new(Mutex::new(writer));
-
+    let writer_arc = Arc::new(Mutex::new(writer));
     let remote = core.remote();
+    let (tx, rx) = mpsc::channel(10);
+
+    #[derive(Debug, Clone)]
+    struct VinsteonRpcImpl {
+        send: mpsc::Sender<u32>
+    };
+
+    impl VinsteonRPC for VinsteonRpcImpl {
+        fn send_cmd(&self, _m: grpc::RequestOptions, req: CmdMsg) -> grpc::SingleResponse<Ack> {
+            let response = Ack::new();
+
+            match req.cmd {
+                Some(CmdMsg_oneof_cmd::lightControl(light_control)) => {
+
+                    self.send.clone()
+                        .send(light_control.level)
+                        .then(|tx| {
+                            match tx {
+                                Ok(_tx) => {
+                                    info!("Sink flushed");
+                                    Ok(())
+                                }
+                                Err(e) => {
+                                    info!("Sink failed! {:?}", e);
+                                    Err(())
+                                }
+                            }
+                        }).wait().unwrap();
+
+
+                },
+                _ => panic!("Unknown command"),
+            }
+
+            grpc::SingleResponse::completed(response)
+        }
+    }
 
     thread::spawn(move || {
         let _server = VinsteonRPCServer::new_pool(
-            "[::]:50051", Default::default(), VinsteonRpcImpl, CpuPool::new(2));
+            "[::]:50051", Default::default(),
+            VinsteonRpcImpl{ send : tx.clone() }, CpuPool::new(2)
+        );
 
         loop {
             thread::park();
         }
     });
 
+
     // Create a thread that performs some work.
     thread::spawn(move || {
-        loop {
-            // INSERT WORK HERE - the work should be modeled as having a _future_ result.
-            let www1 = original.clone();
-            let www2 = original.clone();
 
-            // In this fake example, we do not care about the values of the `Ok` and `Err`
-            // variants. thus, we can use `()` for both.
-            // Note: `::futures::done()` will be called ::futures::result() in later
-            // versions of the future crate.
+        let writer_future = rx.for_each(|res| {
 
-            let f = ::futures::done::<(), ()>(Ok(()));
-            // END WORK
+            let shared_writer = writer_arc.clone();
+            match res {
+                level => {
+                    remote.spawn(move |_| {
+                        let scale = level as f64 / 100.0;
+                        let brightness = (scale * 255.0) as u8;
+                        println!("Brightness set to {}", brightness);
 
-            // `remote.spawn` accepts a closure with a single parameter of type `&Handle`.
-            // In this example, the `&Handle` is not needed. The future returned from the
-            // closure will be executed.
-            //
-            // Note: We must use `remote.spawn()` instead of `handle.spawn()` because the
-            // Core was created on a different thread.
-            std::thread::sleep(time::Duration::from_secs(1));
+                        let on = vec![0x02, 0x62, 65, 29, 30, 15, 0x11, brightness];
+                        //let on = vec![0x02, 0x62, 0x1A, 0xD0, 0xF4, 15, 0x12, 255];
 
-            remote.spawn(move |_| {
-                let mut wr = www1.lock().expect("Unable to lock output");
+                        let mut exclusive_writer = shared_writer.lock().expect("Unable to lock output");
+                        exclusive_writer.start_send(on).unwrap();
+                        exclusive_writer.poll_complete().unwrap();
+                        Ok(())
+                    });
+                }
+            }
 
-                //let on = vec![0x02, 0x62, 65, 29, 30, 15, 0x12, 255];
-                let on = vec![0x02, 0x62, 0x1A, 0xD0, 0xF4, 15, 0x12, 255];
-                wr.start_send(on);
-                wr.poll_complete();
-                Ok(())
-            });
+            Ok(())
+        });
 
-            std::thread::sleep(time::Duration::from_secs(1));
-
-            remote.spawn(move |_| {
-                let mut wr = www2.lock().expect("Unable to lock output");
-
-                //let off = vec![0x02, 0x62, 65, 29, 30, 15, 0x14, 0];
-                let off = vec![0x02, 0x62, 0x1A, 0xD0, 0xF4, 15, 0x14, 0];
-
-                wr.start_send(off);
-                wr.poll_complete();
-                Ok(())
-            });
-        }
+        writer_future.wait().unwrap();
     });
 
     core.run(printer).unwrap();
