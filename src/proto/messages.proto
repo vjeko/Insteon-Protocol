@@ -1,5 +1,9 @@
 syntax = "proto3";
 
+import "rustproto.proto";
+
+option (rustproto.expose_oneof_all) = true;
+
 message Event {
 
   string device = 1;
@@ -13,7 +17,7 @@ message Event {
 }
 
 message LightControl {
-  string device = 1;
+  bytes device = 1;
   uint32 level = 2;
 }
 

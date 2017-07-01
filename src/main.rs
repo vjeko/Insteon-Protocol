@@ -13,6 +13,13 @@ extern crate protobuf;
 extern crate grpc;
 extern crate futures;
 extern crate futures_cpupool;
+extern crate tls_api;
+
+#[macro_use]
+extern crate serde_derive;
+extern crate bincode;
+
+use bincode::{serialize, deserialize, Infinite};
 
 use std::{io, str};
 use std::thread;
@@ -69,16 +76,17 @@ impl Encoder for LineCodec {
     type Error = io::Error;
 
     fn encode(&mut self, _item: Self::Item, _dst: &mut BytesMut) -> Result<(), Self::Error> {
+        _dst.extend_from_slice(&_item);
         Ok(())
     }
 }
 
-fn main() {
 
+fn main() {
     let mut core = Core::new().unwrap();
     let handle = core.handle();
     const DEFAULT_TTY_PATH: &str = "/dev/ttyUSB0";
-
+    const CHANNEL_BUFFER_SIZE : usize = 10;
 
     let tty_path = DEFAULT_TTY_PATH;
     let settings = SerialPortSettings {
@@ -89,7 +97,6 @@ fn main() {
         stop_bits: StopBits::One,
         timeout: Duration::from_millis(1),
     };
-
 
     let mut port = tokio_serial::Serial::from_path(tty_path, &settings, &handle).unwrap();
     port.set_exclusive(false).expect("Unable to set serial port exclusive");
@@ -103,12 +110,12 @@ fn main() {
 
     let writer_arc = Arc::new(Mutex::new(writer));
     let remote = core.remote();
-    let (tx, rx) = mpsc::channel(10);
+    let (tx, rx) = mpsc::channel(CHANNEL_BUFFER_SIZE);
 
     #[derive(Debug, Clone)]
     struct VinsteonRpcImpl {
-        send: mpsc::Sender<u32>
-    };
+        send: mpsc::Sender<(std::vec::Vec<u8>, u32)>
+    }
 
     impl VinsteonRPC for VinsteonRpcImpl {
         fn send_cmd(&self, _m: grpc::RequestOptions, req: CmdMsg) -> grpc::SingleResponse<Ack> {
@@ -118,7 +125,7 @@ fn main() {
                 Some(CmdMsg_oneof_cmd::lightControl(light_control)) => {
 
                     self.send.clone()
-                        .send(light_control.level)
+                        .send((light_control.device, light_control.level))
                         .then(|tx| {
                             match tx {
                                 Ok(_tx) => {
@@ -131,8 +138,6 @@ fn main() {
                                 }
                             }
                         }).wait().unwrap();
-
-
                 },
                 _ => panic!("Unknown command"),
             }
@@ -152,7 +157,6 @@ fn main() {
         }
     });
 
-
     // Create a thread that performs some work.
     thread::spawn(move || {
 
@@ -160,16 +164,30 @@ fn main() {
 
             let shared_writer = writer_arc.clone();
             match res {
-                level => {
+                (device, level) => {
                     remote.spawn(move |_| {
+                        let mut exclusive_writer = shared_writer.lock().unwrap();
+
                         let scale = level as f64 / 100.0;
                         let brightness = (scale * 255.0) as u8;
                         println!("Brightness set to {}", brightness);
 
-                        let on = vec![0x02, 0x62, 65, 29, 30, 15, 0x11, brightness];
-                        //let on = vec![0x02, 0x62, 0x1A, 0xD0, 0xF4, 15, 0x12, 255];
 
-                        let mut exclusive_writer = shared_writer.lock().expect("Unable to lock output");
+                        let msg = InsteonMsg::SendStandardMsg{
+                            addr_to : [device[0], device[1], device[2]],
+                            msg_flags : 15,
+                            cmd1 : 17,
+                            cmd2 : brightness
+                        };
+
+                        let mut struct_repr = serialize(&msg, Infinite).unwrap();
+                        println!("{:?}", struct_repr);
+                        struct_repr.drain(..4);
+                        println!("{:?}", struct_repr);
+
+                        let on = [vec![0x02, 0x62], struct_repr].concat();
+                        println!("{:?}", on);
+
                         exclusive_writer.start_send(on).unwrap();
                         exclusive_writer.poll_complete().unwrap();
                         Ok(())

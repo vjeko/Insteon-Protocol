@@ -2,6 +2,7 @@ use bytes::BytesMut;
 use bytes::{Buf, IntoBuf};
 
 #[derive(Debug)]
+#[derive(Serialize, Deserialize, PartialEq)]
 pub enum InsteonMsg {
 
     StandardMsg {
