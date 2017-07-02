@@ -1,4 +1,9 @@
 #![feature(advanced_slice_patterns, slice_patterns)]
+#![feature(discriminant_value, core_intrinsics)]
+#![feature(plugin)]
+#![plugin(phf_macros)]
+
+extern crate phf;
 
 pub mod insteon_structs;
 pub mod messages_grpc;
@@ -19,13 +24,15 @@ extern crate tls_api;
 extern crate serde_derive;
 extern crate bincode;
 
-use bincode::{serialize, deserialize, Infinite};
+use bincode::{serialize, Infinite};
 
+use std::mem;
 use std::{io, str};
 use std::thread;
 use std::time::Duration;
 use std::sync::Mutex;
 use std::sync::Arc;
+use std::intrinsics::discriminant_value;
 
 use tokio_core::reactor::Core;
 use tokio_io::codec::{Decoder, Encoder};
@@ -83,6 +90,7 @@ impl Encoder for LineCodec {
 
 
 fn main() {
+
     let mut core = Core::new().unwrap();
     let handle = core.handle();
     const DEFAULT_TTY_PATH: &str = "/dev/ttyUSB0";
@@ -102,11 +110,6 @@ fn main() {
     port.set_exclusive(false).expect("Unable to set serial port exclusive");
 
     let (writer, reader) = port.framed(LineCodec).split();
-
-    let printer = reader.for_each(|s| {
-        println!("CMD: {:?}", s);
-        Ok(())
-    });
 
     let writer_arc = Arc::new(Mutex::new(writer));
     let remote = core.remote();
@@ -199,6 +202,11 @@ fn main() {
         });
 
         writer_future.wait().unwrap();
+    });
+
+    let printer = reader.for_each(|s| {
+        println!("CMD: {:?}", s);
+        Ok(())
     });
 
     core.run(printer).unwrap();
