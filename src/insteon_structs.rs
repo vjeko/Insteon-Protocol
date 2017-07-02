@@ -95,8 +95,25 @@ static SIZE_MAP: phf::Map<u8, usize> = phf_map!(
     0x62u8 => 6,
 );
 
+static DISCRIMINANT_MAP: phf::Map<u8, u8> = phf_map!(
+    0x50u8 => 0,
+    0x51u8 => 1,
+    0x52u8 => 2,
+    0x53u8 => 3,
+    0x54u8 => 4,
+    0x55u8 => 5,
+    0x56u8 => 6,
+    0x57u8 => 7,
+    0x58u8 => 8,
+    0x62u8 => 9,
+);
+
 pub fn get_msg_size(msg_type: &u8) -> Option<usize> {
     SIZE_MAP.get(msg_type).cloned()
+}
+
+pub fn get_discriminant(msg_type: &u8) -> Option<u8> {
+    DISCRIMINANT_MAP.get(msg_type).cloned()
 }
 
 impl InsteonMsg {
@@ -123,7 +140,8 @@ impl InsteonMsg {
 
             Some(size) => {
                 let v : Vec<u8> = current.take(size).collect();
-                Some((decode(0, v), size))
+                let discriminant = get_discriminant(&command_type).unwrap();
+                Some((decode(discriminant, v), size))
             },
 
             None => {

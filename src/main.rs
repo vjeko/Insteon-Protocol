@@ -19,6 +19,7 @@ extern crate grpc;
 extern crate futures;
 extern crate futures_cpupool;
 extern crate tls_api;
+extern crate env_logger;
 
 #[macro_use]
 extern crate serde_derive;
@@ -33,6 +34,9 @@ use std::time::Duration;
 use std::sync::Mutex;
 use std::sync::Arc;
 use std::intrinsics::discriminant_value;
+
+use log::{LogRecord, LogLevelFilter};
+use env_logger::LogBuilder;
 
 use tokio_core::reactor::Core;
 use tokio_io::codec::{Decoder, Encoder};
@@ -91,6 +95,13 @@ impl Encoder for LineCodec {
 
 fn main() {
 
+    let format = |record: &LogRecord| {
+                 format!("{} - {}", record.level(), record.args())
+             };
+    let mut builder = LogBuilder::new();
+    builder.format(format).filter(Some("vinsteon"), LogLevelFilter::Trace);
+    builder.init().unwrap();
+
     let mut core = Core::new().unwrap();
     let handle = core.handle();
     const DEFAULT_TTY_PATH: &str = "/dev/ttyUSB0";
@@ -106,8 +117,10 @@ fn main() {
         timeout: Duration::from_millis(1),
     };
 
+    info!("Connecting to the serial port...");
     let mut port = tokio_serial::Serial::from_path(tty_path, &settings, &handle).unwrap();
     port.set_exclusive(false).expect("Unable to set serial port exclusive");
+    info!("... done.");
 
     let (writer, reader) = port.framed(LineCodec).split();
 
@@ -149,6 +162,7 @@ fn main() {
         }
     }
 
+    info!("Spawning GRPC even handler.");
     thread::spawn(move || {
         let _server = VinsteonRPCServer::new_pool(
             "[::]:50051", Default::default(),
@@ -160,7 +174,7 @@ fn main() {
         }
     });
 
-    // Create a thread that performs some work.
+    info!("Spawning serial port writer thread.");
     thread::spawn(move || {
 
         let writer_future = rx.for_each(|res| {
@@ -173,8 +187,7 @@ fn main() {
 
                         let scale = level as f64 / 100.0;
                         let brightness = (scale * 255.0) as u8;
-                        println!("Brightness set to {}", brightness);
-
+                        trace!("Brightness set to {}", brightness);
 
                         let msg = InsteonMsg::SendStandardMsg{
                             addr_to : [device[0], device[1], device[2]],
@@ -183,15 +196,15 @@ fn main() {
                             cmd2 : brightness
                         };
 
+                        debug!("Sending command: {:?}", msg);
+
                         let mut struct_repr = serialize(&msg, Infinite).unwrap();
-                        println!("{:?}", struct_repr);
                         struct_repr.drain(..4);
-                        println!("{:?}", struct_repr);
 
-                        let on = [vec![0x02, 0x62], struct_repr].concat();
-                        println!("{:?}", on);
+                        let encoded_msg = [vec![0x02, 0x62], struct_repr].concat();
+                        trace!("Encoded command: {:?}", encoded_msg);
 
-                        exclusive_writer.start_send(on).unwrap();
+                        exclusive_writer.start_send(encoded_msg).unwrap();
                         exclusive_writer.poll_complete().unwrap();
                         Ok(())
                     });
@@ -205,9 +218,10 @@ fn main() {
     });
 
     let printer = reader.for_each(|s| {
-        println!("CMD: {:?}", s);
+        info!("Received command: {:?}", s);
         Ok(())
     });
 
+    debug!("Spawning serial port reader thread.");
     core.run(printer).unwrap();
 }
