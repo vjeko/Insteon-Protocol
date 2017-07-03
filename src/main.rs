@@ -126,9 +126,9 @@ fn main() {
                 debug!("Sending command: {:?}", msg);
 
                 let mut struct_repr = serialize(&msg, Infinite).unwrap();
-                struct_repr.drain(..4);
+                struct_repr.drain(..DISCRIMINANT_SIZE);
 
-                let encoded_msg = [vec![0x02, 0x62], struct_repr].concat();
+                let encoded_msg = [vec![MSG_BEGIN, SEND_STANDARD_MSG], struct_repr].concat();
                 trace!("Encoded command: {:?}", encoded_msg);
 
                 let mut exclusive_writer = shared_writer.lock().unwrap();

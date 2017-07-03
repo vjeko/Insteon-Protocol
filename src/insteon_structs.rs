@@ -70,16 +70,20 @@ pub enum InsteonMsg {
 
 }
 
-const STANDARD_MSG :u8 = 0x50;
-const EXTENDED_MSG :u8 = 0x51;
-const X10_RECEIVED :u8 = 0x52;
-const ALL_LINKING_COMPLETED :u8 = 0x53;
-const BUTTON_EVENT_REPORT :u8 = 0x54;
-const USER_RESET_DETECTED :u8 = 0x55;
-const ALL_LINK_CLEANUP_FAILURE_REPORT :u8 = 0x56;
-const ALL_LINK_RECORD_RESPONSE :u8 = 0x57;
-const ALL_LINK_CLEANUP_STATUS_REPORT :u8 = 0x58;
-const SEND_STANDARD_MSG :u8 = 0x62;
+pub const DISCRIMINANT_SIZE : usize = 4;
+
+pub const MSG_BEGIN :u8 = 0x02;
+
+pub const STANDARD_MSG :u8 = 0x50;
+pub const EXTENDED_MSG :u8 = 0x51;
+pub const X10_RECEIVED :u8 = 0x52;
+pub const ALL_LINKING_COMPLETED :u8 = 0x53;
+pub const BUTTON_EVENT_REPORT :u8 = 0x54;
+pub const USER_RESET_DETECTED :u8 = 0x55;
+pub const ALL_LINK_CLEANUP_FAILURE_REPORT :u8 = 0x56;
+pub const ALL_LINK_RECORD_RESPONSE :u8 = 0x57;
+pub const ALL_LINK_CLEANUP_STATUS_REPORT :u8 = 0x58;
+pub const SEND_STANDARD_MSG :u8 = 0x62;
 
 
 static SIZE_MAP: phf::Map<u8, usize> = phf_map!(
