@@ -117,9 +117,9 @@ fn main() {
                 trace!("Brightness set to {}", brightness);
 
                 let msg = InsteonMsg::SendStandardMsg{
-                    addr_to : [device[0], device[1], device[2]],
+                    addr_to : [device[1], device[2], device[3]],
                     msg_flags : 15,
-                    cmd1 : 17,
+                    cmd1 : u8Command(Command::On),
                     cmd2 : brightness
                 };
 

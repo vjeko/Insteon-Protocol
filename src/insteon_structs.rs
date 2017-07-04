@@ -70,6 +70,40 @@ pub enum InsteonMsg {
 
 }
 
+#[derive(Copy, Clone)]
+pub enum Command {
+    DataReq = 0x03,
+    InsteonVer = 0x0D,
+    IdReq = 0x10,
+    On = 0x11,
+    FastOn = 0x12,
+    Off = 0x13,
+    FastOff = 0x14,
+    BrightStep = 0x15,
+    DimStep = 0x16,
+    StartChange = 0x17,
+    StopChange = 0x18,
+    StatusReq = 0x19,
+    GetOpFlags = 0x1F,
+    SetOpFlags = 0x20,
+    SetHiAddr = 0x28,
+    PokeEE = 0x29,
+    PeekEE = 0x2B,
+    OnAtRate = 0x2E,
+    OffAtRate = 0x2F,
+    WriteOutput = 0x48,
+    ReadInput = 0x49,
+    GetSensorVal = 0x4A,
+    ReadCfg = 0x4E,
+    IoModuleCtrl = 0x4F,
+    ThermalZoneInfo = 0x6A,
+    SetImCfg = 0x6B
+}
+
+pub fn u8Command(cmd: Command) -> u8 {
+    cmd as u8
+}
+
 pub const DISCRIMINANT_SIZE : usize = 4;
 
 pub const MSG_BEGIN :u8 = 0x02;

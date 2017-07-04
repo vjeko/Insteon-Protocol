@@ -17,7 +17,7 @@ message Event {
 }
 
 message LightControl {
-  bytes device = 1;
+  uint32 device = 1;
   uint32 level = 2;
 }
 
