@@ -4,6 +4,7 @@ use bincode::{deserialize};
 use phf;
 
 #[derive(Debug)]
+#[derive(Copy, Clone)]
 #[derive(Serialize, Deserialize, PartialEq)]
 pub enum InsteonMsg {
 

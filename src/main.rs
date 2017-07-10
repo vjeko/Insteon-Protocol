@@ -16,6 +16,7 @@ extern crate bytes;
 extern crate protobuf;
 extern crate phf;
 extern crate grpc;
+extern crate bus;
 extern crate futures;
 extern crate futures_cpupool;
 extern crate tls_api;
@@ -26,6 +27,7 @@ extern crate serde_derive;
 extern crate bincode;
 
 use bincode::{serialize, Infinite};
+use bus::Bus;
 
 use std::str;
 use std::thread;
@@ -51,6 +53,7 @@ use insteon_structs::*;
 use rpc::VinsteonRpcImpl;
 use messages_grpc::*;
 use codec::*;
+
 
 fn setup_logging() {
     let format = |record: &LogRecord| {
@@ -98,11 +101,18 @@ fn main() {
     let remote = core.remote();
 
     let (tx, rx) = mpsc::channel(CHANNEL_BUFFER_SIZE);
+    let msg_bus_arc = Arc::new(Mutex::new(Bus::new(10)));
+
+    let printer = reader.for_each(|s| {
+        info!("Received command: {:?}", s);
+        msg_bus_arc.lock().unwrap().broadcast(s);
+        Ok(())
+    });
 
     info!("Spawning GRPC event handler.");
     let _server = VinsteonRPCServer::new_pool(
         GRPC_ADDRESS, Default::default(),
-        VinsteonRpcImpl{ send : tx.clone() }, CpuPool::new(GRPC_THREAD_NUM));
+        VinsteonRpcImpl{send : tx.clone(), msg_bus : msg_bus_arc.clone() }, CpuPool::new(GRPC_THREAD_NUM));
 
     info!("Spawning serial port writer thread.");
     thread::spawn(move || {
@@ -117,7 +127,7 @@ fn main() {
                 trace!("Brightness set to {}", brightness);
 
                 let msg = InsteonMsg::SendStandardMsg{
-                    addr_to : [device[1], device[2], device[3]],
+                    addr_to : device,
                     msg_flags : 15,
                     cmd1 : u8Command(Command::On),
                     cmd2 : brightness
@@ -141,11 +151,6 @@ fn main() {
         });
 
         writer_future.wait().unwrap();
-    });
-
-    let printer = reader.for_each(|s| {
-        info!("Received command: {:?}", s);
-        Ok(())
     });
 
     debug!("Spawning serial port reader thread.");

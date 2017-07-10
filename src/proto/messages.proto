@@ -21,7 +21,9 @@ message LightControl {
   uint32 level = 2;
 }
 
-message Ack { }
+message Ack {
+  bool success = 1;
+}
 
 message CmdMsg {
   oneof cmd {
@@ -31,4 +33,5 @@ message CmdMsg {
 
 service VinsteonRPC {
   rpc SendCmd(CmdMsg) returns (Ack) {}
+  rpc SendCmdReliable(CmdMsg) returns (Ack) {}
 }

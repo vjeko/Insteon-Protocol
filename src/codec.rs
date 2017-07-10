@@ -14,10 +14,7 @@ impl Decoder for LineCodec {
         const COMMAND_START :u8 = 0x02;
         match src.iter().position(|x| *x == COMMAND_START ) {
             Some(idx) => src.split_to(idx + 1),
-            None => {
-                src.clear();
-                return Ok(None);
-            }
+            None => return Ok(None)
         };
 
         match InsteonMsg::new(&src) {
