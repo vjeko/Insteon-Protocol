@@ -5,6 +5,7 @@ use std::time::Duration;
 use std::fmt::Debug;
 use std::sync::Mutex;
 use std::sync::Arc;
+use robots::actors::ActorRef;
 
 use futures::sync::mpsc;
 use futures::Sink;
@@ -16,7 +17,7 @@ use insteon_structs::*;
 
 #[derive(Clone)]
 pub struct VinsteonRpcImpl {
-    pub send :    mpsc::Sender<([u8; 3], u32)>,
+    pub actor   : ActorRef,
     pub msg_bus : Arc<Mutex<Bus<InsteonMsg>>>
 }
 
@@ -43,13 +44,13 @@ pub const SEND_RETRIES :usize = 10;
 impl VinsteonRPC for VinsteonRpcImpl {
 
     fn send_cmd(&self, _m: grpc::RequestOptions, req: CmdMsg) -> grpc::SingleResponse<Ack> {
+
         let response = Ack::new();
 
         match req.cmd {
             Some(CmdMsg_oneof_cmd::lightControl(light_control)) =>
-                self.send.clone()
-                    .send((u32_u8(light_control.device), light_control.level))
-                    .then(log_result).wait().unwrap(),
+                self.actor.tell_to(self.actor.clone(), ActorMsg::Level(
+                    (u32_u8(light_control.device), light_control.level))),
 
             _ => error!("Unknown command"),
         }
@@ -88,9 +89,9 @@ impl VinsteonRPC for VinsteonRpcImpl {
             Some(CmdMsg_oneof_cmd::lightControl(light_control)) => {
                 let dst = u32_u8(light_control.device);
 
-                let mut send_closure = || self.send.clone()
-                    .send((dst, light_control.level))
-                    .then(log_result).wait().unwrap();
+                let mut send_closure = ||
+                    self.actor.tell_to(self.actor.clone(), ActorMsg::Level(
+                        (u32_u8(light_control.device), light_control.level)));
 
                 debug!("Waiting for the confirmation");
                 let mut get_ack_closure = || get_ack(dst, light_control.level as u8);

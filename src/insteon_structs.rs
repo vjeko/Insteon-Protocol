@@ -3,6 +3,13 @@ use bytes::{Buf, IntoBuf};
 use bincode::{deserialize};
 use phf;
 
+
+#[derive(Copy, Clone)]
+pub enum ActorMsg {
+    Level(([u8; 3], u32)),
+    Ping,
+}
+
 #[derive(Debug)]
 #[derive(Copy, Clone)]
 #[derive(Serialize, Deserialize, PartialEq)]
