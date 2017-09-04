@@ -5,7 +5,6 @@ use insteon_structs::*;
 
 pub struct LineCodec;
 
-
 impl Decoder for LineCodec {
     type Item = InsteonMsg;
     type Error = io::Error;

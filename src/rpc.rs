@@ -7,13 +7,13 @@ use std::sync::Mutex;
 use std::sync::Arc;
 use robots::actors::ActorRef;
 
-use futures::sync::mpsc;
-use futures::Sink;
-use futures::Future;
-
 use messages_grpc::*;
 use messages::*;
 use insteon_structs::*;
+
+pub struct RpcActor {
+
+}
 
 #[derive(Clone)]
 pub struct VinsteonRpcImpl {
@@ -21,7 +21,7 @@ pub struct VinsteonRpcImpl {
     pub msg_bus : Arc<Mutex<Bus<InsteonMsg>>>
 }
 
-fn log_result<T, E : Debug>(result: Result<T, E>) -> Result<(()), (())>{
+fn _log_result<T, E : Debug>(result: Result<T, E>) -> Result<(()), (())>{
     match result {
         Ok(_) => trace!("Sink flushed"),
         Err(ref e) => trace!("Sink failed! {:?}", e),
@@ -89,7 +89,7 @@ impl VinsteonRPC for VinsteonRpcImpl {
             Some(CmdMsg_oneof_cmd::lightControl(light_control)) => {
                 let dst = u32_u8(light_control.device);
 
-                let mut send_closure = ||
+                let send_closure = ||
                     self.actor.tell_to(self.actor.clone(), ActorMsg::Level(
                         (u32_u8(light_control.device), light_control.level)));
 
@@ -100,7 +100,7 @@ impl VinsteonRPC for VinsteonRpcImpl {
                     retry(&mut get_ack_closure, WAIT_ACK_RETRIES)
                 };
 
-                retry(&mut sync_wait_closure, SEND_RETRIES);
+                retry(&mut sync_wait_closure, SEND_RETRIES).unwrap();
             },
 
             _ => error!("Unknown command"),
