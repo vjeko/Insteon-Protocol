@@ -17,7 +17,6 @@ use codec::*;
 
 pub struct SerialReaderActor {}
 
-
 impl Actor for SerialReaderActor {
     fn receive(&self, message: Box<Any>, _context: ActorCell) {
         if let Ok(message) = Box::<Any>::downcast::<ReaderActorMsg>(message) {
@@ -41,7 +40,6 @@ pub struct SerialWriterActor {
 
 impl Actor for SerialWriterActor {
     fn receive(&self, message: Box<Any>, _context: ActorCell) {
-
         if let Ok(message) = Box::<Any>::downcast::<ActorMsg>(message) {
             match *message {
                 ActorMsg::Level((device, level)) => {

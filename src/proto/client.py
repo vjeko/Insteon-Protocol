@@ -17,4 +17,5 @@ light = messages_pb2.LightControl(
         device = int.from_bytes(binary, byteorder='big'),
         level = int(sys.argv[4]))
 msg = messages_pb2.CmdMsg(lightControl = light)
+#feature = stub.SendCmd( msg )
 feature = stub.SendCmdReliable( msg )

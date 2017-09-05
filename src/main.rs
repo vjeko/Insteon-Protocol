@@ -23,7 +23,6 @@ extern crate futures_cpupool;
 extern crate tls_api;
 extern crate env_logger;
 
-
 #[macro_use] extern crate serde_derive;
 extern crate bincode;
 extern crate serde;
@@ -56,6 +55,8 @@ use messages_grpc::*;
 use codec::*;
 use serial_writer::SerialWriterActor;
 use serial_writer::SerialReaderActor;
+use rpc::RpcReqActor;
+use rpc::RpcActor;
 
 
 fn setup_logging() {
@@ -91,8 +92,9 @@ fn setup_serial_port(core: &Core) -> tokio_io::codec::Framed<tokio_serial::Seria
 
 fn main() {
 
-    const GRPC_THREAD_NUM     : usize = 2;
-    static GRPC_ADDRESS       : &'static str = "[::]:50051";
+    const ACTOR_SYSTEM_THREAD_NUM : u32 = 4;
+    const GRPC_THREAD_NUM         : usize = 2;
+    static GRPC_ADDRESS           : &'static str = "[::]:50051";
 
     setup_logging();
 
@@ -103,12 +105,16 @@ fn main() {
     let writer_arc = Arc::new(Mutex::new(writer));
     let msg_bus_arc = Arc::new(Mutex::new(Bus::new(10)));
 
-    let actor_system = ActorSystem::new("test".to_owned());
+    let actor_system = ActorSystem::new("vinsteon_system".to_owned());
+    actor_system.spawn_threads(ACTOR_SYSTEM_THREAD_NUM);
 
-    let writer_props = Props::new(
-        Arc::new(SerialWriterActor::new),
-        (writer_arc));
-    let serial_writer = actor_system.actor_of(writer_props, "serial_writer".to_owned());
+    let ser_tx_props = Props::new(
+        Arc::new(SerialWriterActor::new), (writer_arc));
+    let ser_tx_actor = actor_system.actor_of(ser_tx_props, "ser_tx".to_owned());
+
+    let rpc_props = Props::new(
+        Arc::new(RpcActor::new), (ser_tx_actor.clone(), msg_bus_arc.clone()));
+    let rpc_actor = actor_system.actor_of(rpc_props, "rpc".to_owned());
 
     let reader_props = Props::new(
         Arc::new(SerialReaderActor::new), ());
@@ -123,8 +129,10 @@ fn main() {
     let _server = VinsteonRPCServer::new_pool(
         GRPC_ADDRESS, Default::default(),
         VinsteonRpcImpl{
-            actor : serial_writer.clone(),
-            msg_bus : msg_bus_arc.clone() }, CpuPool::new(GRPC_THREAD_NUM));
+            ser_tx_actor : ser_tx_actor.clone(),
+            rpc_actor : rpc_actor.clone(),
+            msg_bus : msg_bus_arc.clone(),
+            actor_system : actor_system.clone() }, CpuPool::new(GRPC_THREAD_NUM));
 
     info!("Spawning persitence phread.");
     thread::spawn(|| {

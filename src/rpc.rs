@@ -5,20 +5,161 @@ use std::time::Duration;
 use std::fmt::Debug;
 use std::sync::Mutex;
 use std::sync::Arc;
-use robots::actors::ActorRef;
+use robots::actors::{ActorRef, ActorSystem, Actor, Any, ActorCell, Props};
+use robots::actors::ActorContext;
 
 use messages_grpc::*;
 use messages::*;
 use insteon_structs::*;
 
-pub struct RpcActor {
 
+#[derive(Clone)]
+pub enum RpcActorMsg {
+    Set(LightControl),
+    SetReliable(CmdMsg),
+}
+
+#[derive(Clone)]
+pub enum RpcReqActorMsg {
+    Set(ActorRef, LightControl),
+    SetReliable(ActorRef, CmdMsg),
+}
+
+pub struct RpcReqActor {
+    pub ser_tx_actor : ActorRef,
+    pub msg_bus      : Arc<Mutex<Bus<InsteonMsg>>>
+}
+
+impl RpcReqActor {
+    pub fn new(tuple : (ActorRef, Arc<Mutex<Bus<InsteonMsg>>>)) -> RpcReqActor {
+        let (ser_tx_actor, msg_bus) = tuple;
+        RpcReqActor {
+            ser_tx_actor : ser_tx_actor,
+            msg_bus : msg_bus,
+        }
+    }
+
+    fn send_cmd_reliable(&self, req: CmdMsg) -> Ack {
+        let mut bus = self.msg_bus.lock().unwrap().add_rx();
+
+        let mut get_ack = |_from : [u8; 3], _cmd2: u8| -> Result<(), ()> {
+            match bus.recv_timeout(Duration::from_millis(200)) {
+                Ok(InsteonMsg::StandardMsg { addr_from: _from, cmd2: _cmd2, ..}) => {
+                    debug!("Received the acknowledgment from: {:?} ", _from);
+                    Ok(())},
+                Ok(other) => {
+                    trace!("Not matching the pattern: {:?}", other);
+                    Err(())},
+                Err(_) => {
+                    trace!("Timeout");
+                    Err(())}
+            }
+        };
+
+        fn retry(f: &mut FnMut() -> Result<(), ()>, retries : usize) -> Result<(), ()> {
+            match (retries, f()) {
+                (0, _) => Err(()),
+                (_, ok@Ok(())) => ok,
+                (_, Err(())) => retry(f, retries - 1)
+            }
+        };
+
+        match req.cmd {
+            Some(CmdMsg_oneof_cmd::lightControl(light_control)) => {
+
+                let dst = u32_u8(light_control.device);
+
+                let send_closure = ||
+                    self.ser_tx_actor.tell_to(self.ser_tx_actor.clone(), ActorMsg::Level(
+                        (u32_u8(light_control.device), light_control.level)));
+
+                debug!("Waiting for the confirmation");
+                let mut get_ack_closure = || get_ack(dst, light_control.level as u8);
+                let mut sync_wait_closure = || {
+                    send_closure();
+                    retry(&mut get_ack_closure, WAIT_ACK_RETRIES)
+                };
+
+                retry(&mut sync_wait_closure, SEND_RETRIES);
+            },
+
+            _ => error!("Unknown command"),
+        };
+
+        Ack::new()
+    }
+}
+
+impl Actor for RpcReqActor {
+    fn receive(&self, message: Box<Any>, context: ActorCell) {
+        if let Ok(message) = Box::<Any>::downcast::<RpcReqActorMsg>(message) {
+            match *message {
+                RpcReqActorMsg::Set(ref future, ref light_control) => {
+                    info!("RpcReqActor received RpcReqActorMsg::Set");
+                    self.ser_tx_actor.tell_to(
+                        self.ser_tx_actor.clone(),
+                        ActorMsg::Level((u32_u8(light_control.device), light_control.level)));
+                    context.complete(future.clone(), Ack::new());
+                },
+                RpcReqActorMsg::SetReliable(ref future, ref cmd) => {
+                    info!("RpcReqActor received RpcReqActorMsg::SetReliable");
+                    self.send_cmd_reliable(cmd.clone());
+                    context.complete(future.clone(), Ack::new());
+                },
+            }
+        }
+
+        context.kill_me();
+    }
+}
+
+pub struct RpcActor {
+    pub ser_tx_actor : ActorRef,
+    pub msg_bus      : Arc<Mutex<Bus<InsteonMsg>>>
+}
+
+impl RpcActor {
+    pub fn new(tuple : (ActorRef, Arc<Mutex<Bus<InsteonMsg>>>)) -> RpcActor {
+        let (ser_tx_actor, msg_bus) = tuple;
+        RpcActor {
+            ser_tx_actor : ser_tx_actor,
+            msg_bus : msg_bus,
+        }
+    }
+}
+
+impl Actor for RpcActor {
+    fn receive(&self, message: Box<Any>, _context: ActorCell) {
+
+        if let Ok(message) = Box::<Any>::downcast::<RpcActorMsg>(message) {
+            match *message {
+                RpcActorMsg::Set(light_control) => {
+                    let props = Props::new(Arc::new(RpcReqActor::new),
+                                           (self.ser_tx_actor.clone(), self.msg_bus.clone()));
+                    let req_actor = _context.actor_of(props, "req_1".to_owned());
+                    info!("RpcActor received a message");
+                    _context.tell(req_actor.unwrap(), RpcReqActorMsg::Set(
+                        _context.sender().clone(), light_control.clone()));
+                },
+                RpcActorMsg::SetReliable(light_control) => {
+                    let props = Props::new(Arc::new(RpcReqActor::new),
+                                           (self.ser_tx_actor.clone(), self.msg_bus.clone()));
+                    let req_actor = _context.actor_of(props, "req_1".to_owned());
+                    info!("RpcActor received a message");
+                    _context.tell(req_actor.unwrap(), RpcReqActorMsg::SetReliable(
+                        _context.sender().clone(), light_control.clone()));
+                },
+            }
+        }
+    }
 }
 
 #[derive(Clone)]
 pub struct VinsteonRpcImpl {
-    pub actor   : ActorRef,
-    pub msg_bus : Arc<Mutex<Bus<InsteonMsg>>>
+    pub actor_system        : ActorSystem,
+    pub rpc_actor           : ActorRef,
+    pub ser_tx_actor        : ActorRef,
+    pub msg_bus             : Arc<Mutex<Bus<InsteonMsg>>>
 }
 
 fn _log_result<T, E : Debug>(result: Result<T, E>) -> Result<(()), (())>{
@@ -48,10 +189,12 @@ impl VinsteonRPC for VinsteonRpcImpl {
         let response = Ack::new();
 
         match req.cmd {
-            Some(CmdMsg_oneof_cmd::lightControl(light_control)) =>
-                self.actor.tell_to(self.actor.clone(), ActorMsg::Level(
-                    (u32_u8(light_control.device), light_control.level))),
-
+            Some(CmdMsg_oneof_cmd::lightControl(light_control)) => {
+                let future = self.actor_system.ask(
+                    self.rpc_actor.clone(),
+                    RpcActorMsg::Set(light_control.clone()), "req_1".to_owned());
+                let response: Ack = self.actor_system.extract_result(future);
+            }
             _ => error!("Unknown command"),
         }
 
@@ -59,52 +202,12 @@ impl VinsteonRPC for VinsteonRpcImpl {
     }
 
     fn send_cmd_reliable(&self, _m: grpc::RequestOptions, req: CmdMsg) -> grpc::SingleResponse<Ack> {
-        let mut bus = self.msg_bus.lock().unwrap().add_rx();
-
-        let mut get_ack = |_from : [u8; 3], _cmd2: u8| -> Result<(), ()> {
-            match bus.recv_timeout(Duration::from_millis(200)) {
-                Ok(InsteonMsg::StandardMsg { addr_from: _from, cmd2: _cmd2, ..}) => {
-                    debug!("Received the acknowledgment from: {:?} ", _from);
-                    Ok(())},
-                Ok(other) => {
-                    trace!("Not matching the pattern: {:?}", other);
-                    Err(())},
-                Err(_) => {
-                    trace!("Timeout");
-                    Err(())}
-            }
-        };
-
-        fn retry(f: &mut FnMut() -> Result<(), ()>, retries : usize) -> Result<(), ()> {
-            match (retries, f()) {
-                (0, _) => Err(()),
-                (_, ok@Ok(())) => ok,
-                (_, Err(())) => retry(f, retries - 1)
-            }
-        };
-
         let response = Ack::new();
 
-        match req.cmd {
-            Some(CmdMsg_oneof_cmd::lightControl(light_control)) => {
-                let dst = u32_u8(light_control.device);
-
-                let send_closure = ||
-                    self.actor.tell_to(self.actor.clone(), ActorMsg::Level(
-                        (u32_u8(light_control.device), light_control.level)));
-
-                debug!("Waiting for the confirmation");
-                let mut get_ack_closure = || get_ack(dst, light_control.level as u8);
-                let mut sync_wait_closure = || {
-                    send_closure();
-                    retry(&mut get_ack_closure, WAIT_ACK_RETRIES)
-                };
-
-                retry(&mut sync_wait_closure, SEND_RETRIES).unwrap();
-            },
-
-            _ => error!("Unknown command"),
-        }
+        let future = self.actor_system.ask(
+            self.rpc_actor.clone(),
+            RpcActorMsg::SetReliable(req.clone()), "req_1".to_owned());
+        let response: Ack = self.actor_system.extract_result(future);
 
         grpc::SingleResponse::completed(response)
     }
