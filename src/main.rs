@@ -33,6 +33,7 @@ extern crate robots;
 use robots::actors::{ActorSystem, Props};
 use bus::Bus;
 
+use std::net::{Ipv4Addr, SocketAddrV4};
 use std::str;
 use std::thread;
 use std::time::Duration;
@@ -51,6 +52,7 @@ use tokio_serial::*;
 use futures::stream::Stream;
 use futures_cpupool::CpuPool;
 
+use grpc::Server;
 use rpc::VinsteonRpcImpl;
 use messages_grpc::*;
 use codec::*;
@@ -129,13 +131,18 @@ fn main() {
     });
 
     info!("Spawning GRPC event handler.");
-    let _server = VinsteonRPCServer::new_pool(
-        GRPC_ADDRESS, Default::default(),
+    let mut server = grpc::ServerBuilder::new_plain();
+
+    server.http.set_port(50051);
+    server.add_service(VinsteonRPCServer::new_service_def(
         VinsteonRpcImpl{
             ser_tx_actor : ser_tx_actor.clone(),
             rpc_actor : rpc_actor.clone(),
             msg_bus : msg_bus_arc.clone(),
-            actor_system : actor_system.clone() }, CpuPool::new(GRPC_THREAD_NUM));
+            actor_system : actor_system.clone() }
+    ));
+    server.http.set_cpu_pool_threads(4);
+    let _server = server.build().expect("server");
 
     info!("Spawning persitence phread.");
     thread::spawn(|| {
