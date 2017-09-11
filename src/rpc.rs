@@ -1,87 +1,98 @@
 use grpc;
+use codec;
 use bus::Bus;
 
+use std::thread;
 use std::time::Duration;
 use std::fmt::Debug;
 use std::sync::Mutex;
 use std::sync::Arc;
-use robots::actors::{ActorRef, ActorSystem, Actor, Any, ActorCell, Props};
-use robots::actors::ActorContext;
+use std::cell::{RefCell, Cell};
+use std::io;
+use futures::Future;
+
+use tokio_timer::{Timer, Timeout};
+use tokio_core::reactor::{Remote, Handle};
+use robots::actors::{ActorContext, ActorRef, ActorSystem, Actor, Any, ActorCell, Props};
 
 use messages_grpc::*;
 use messages::*;
 use insteon_structs::*;
+use codec::LineCodec;
 
 
 #[derive(Clone)]
 pub enum RpcActorMsg {
     Set(LightControl),
     SetReliable(CmdMsg),
+    Timeout,
 }
 
 #[derive(Clone)]
 pub enum RpcReqActorMsg {
     Set(ActorRef, LightControl),
     SetReliable(ActorRef, CmdMsg),
+    //Timeout(ActorRef)
 }
 
 pub struct RpcReqActor {
     pub ser_tx_actor : ActorRef,
-    pub msg_bus      : Arc<Mutex<Bus<InsteonMsg>>>
+    pub msg_bus      : Arc<Mutex<Bus<InsteonMsg>>>,
+    pub future       : RefCell<Option<ActorRef>>,
+    pub event_loop   : Remote,
 }
 
+unsafe impl Sync for RpcReqActor { }
+
 impl RpcReqActor {
-    pub fn new(tuple : (ActorRef, Arc<Mutex<Bus<InsteonMsg>>>)) -> RpcReqActor {
-        let (ser_tx_actor, msg_bus) = tuple;
+    pub fn new(tuple : (ActorRef, Arc<Mutex<Bus<InsteonMsg>>>, Remote)) -> RpcReqActor {
+        let (ser_tx_actor, msg_bus, event_loop) = tuple;
         RpcReqActor {
             ser_tx_actor : ser_tx_actor,
             msg_bus : msg_bus,
+            future : RefCell::new(None),
+            event_loop: event_loop,
+        }
+    }
+
+    pub fn handle_insteon_msg(&self, message: InsteonMsg, context: ActorCell) {
+        info!("RpcReqActor: Received InsteonMsg: {:?}", message);
+    }
+
+    pub fn handle_rpc_msg(&self, message: RpcReqActorMsg, context: ActorCell) {
+        match message {
+            RpcReqActorMsg::Set(ref future, ref light_control) => {
+                info!("RpcReqActor received RpcReqActorMsg::Set");
+                self.ser_tx_actor.tell_to(
+                    self.ser_tx_actor.clone(),
+                    ActorMsg::Level((u32_u8(light_control.device), light_control.level)));
+                context.complete(future.clone(), Ack::new());
+            },
+            RpcReqActorMsg::SetReliable(ref future, ref cmd) => {
+                info!("RpcReqActor received RpcReqActorMsg::SetReliable");
+                self.send_cmd_reliable(cmd.clone());
+
+                let mut bor = self.future.borrow_mut();
+                *bor = None;
+                //self.future = Some(future.clone());
+                let local_context = context.clone();
+                thread::spawn(move ||{
+                    Timer::default().sleep(Duration::from_secs(1)).wait();
+                    local_context.tell(local_context.actor_ref(), RpcActorMsg::Timeout);
+                });
+
+
+                context.complete(future.clone(), Ack::new());
+            },
         }
     }
 
     fn send_cmd_reliable(&self, req: CmdMsg) -> Ack {
-        let mut bus = self.msg_bus.lock().unwrap().add_rx();
-
-        let mut get_ack = |_from : [u8; 3], _cmd2: u8| -> Result<(), ()> {
-            match bus.recv_timeout(Duration::from_millis(200)) {
-                Ok(InsteonMsg::StandardMsg { addr_from: _from, cmd2: _cmd2, ..}) => {
-                    debug!("Received the acknowledgment from: {:?} ", _from);
-                    Ok(())},
-                Ok(other) => {
-                    trace!("Not matching the pattern: {:?}", other);
-                    Err(())},
-                Err(_) => {
-                    trace!("Timeout");
-                    Err(())}
-            }
-        };
-
-        fn retry(f: &mut FnMut() -> Result<(), ()>, retries : usize) -> Result<(), ()> {
-            match (retries, f()) {
-                (0, _) => Err(()),
-                (_, ok@Ok(())) => ok,
-                (_, Err(())) => retry(f, retries - 1)
-            }
-        };
-
         match req.cmd {
             Some(CmdMsg_oneof_cmd::lightControl(light_control)) => {
-
                 let dst = u32_u8(light_control.device);
-
-                let send_closure = ||
-                    self.ser_tx_actor.tell_to(self.ser_tx_actor.clone(), ActorMsg::Level(
-                        (u32_u8(light_control.device), light_control.level)));
-
-                debug!("Waiting for the confirmation");
-                let mut get_ack_closure = || get_ack(dst, light_control.level as u8);
-                let mut sync_wait_closure = || {
-                    send_closure();
-                    retry(&mut get_ack_closure, WAIT_ACK_RETRIES)
-                };
-
-                retry(&mut sync_wait_closure, SEND_RETRIES);
-            },
+                self.ser_tx_actor.tell_to(self.ser_tx_actor.clone(), ActorMsg::Level(
+                    (u32_u8(light_control.device), light_control.level))); },
 
             _ => error!("Unknown command"),
         };
@@ -91,21 +102,13 @@ impl RpcReqActor {
 }
 
 impl Actor for RpcReqActor {
-    fn receive(&self, message: Box<Any>, context: ActorCell) {
-        if let Ok(message) = Box::<Any>::downcast::<RpcReqActorMsg>(message) {
-            match *message {
-                RpcReqActorMsg::Set(ref future, ref light_control) => {
-                    info!("RpcReqActor received RpcReqActorMsg::Set");
-                    self.ser_tx_actor.tell_to(
-                        self.ser_tx_actor.clone(),
-                        ActorMsg::Level((u32_u8(light_control.device), light_control.level)));
-                    context.complete(future.clone(), Ack::new());
-                },
-                RpcReqActorMsg::SetReliable(ref future, ref cmd) => {
-                    info!("RpcReqActor received RpcReqActorMsg::SetReliable");
-                    self.send_cmd_reliable(cmd.clone());
-                    context.complete(future.clone(), Ack::new());
-                },
+
+    fn receive(&self, msg: Box<Any>, context: ActorCell) {
+        match msg.downcast_ref::<RpcReqActorMsg>() {
+            Some(rpc_msg) => self.handle_rpc_msg(rpc_msg.clone(), context.clone()),
+            None => match msg.downcast_ref::<InsteonMsg>() {
+                Some(insteon_msg) => self.handle_insteon_msg(insteon_msg.clone(), context.clone()),
+                None => unreachable!(),
             }
         }
 
@@ -115,40 +118,64 @@ impl Actor for RpcReqActor {
 
 pub struct RpcActor {
     pub ser_tx_actor : ActorRef,
-    pub msg_bus      : Arc<Mutex<Bus<InsteonMsg>>>
+    pub msg_bus      : Arc<Mutex<Bus<InsteonMsg>>>,
+    pub event_loop   : Remote,
 }
 
 impl RpcActor {
-    pub fn new(tuple : (ActorRef, Arc<Mutex<Bus<InsteonMsg>>>)) -> RpcActor {
-        let (ser_tx_actor, msg_bus) = tuple;
+    pub fn new(tuple: (ActorRef, Arc<Mutex<Bus<InsteonMsg>>>, Remote)) -> RpcActor {
+        let (ser_tx_actor, msg_bus, event_loop) = tuple;
         RpcActor {
-            ser_tx_actor : ser_tx_actor,
-            msg_bus : msg_bus,
+            ser_tx_actor: ser_tx_actor,
+            msg_bus: msg_bus,
+            event_loop: event_loop,
+        }
+    }
+
+    pub fn handle_insteon_msg(&self, message: InsteonMsg, context: ActorCell) {
+        info!("RpcActor: Received InsteonMsg: {:?}", message);
+        for (path, actor) in &context.children() {
+            context.tell(actor.clone(), message);
+        }
+    }
+
+    pub fn handle_rpc_msg(&self, message: RpcActorMsg, context: ActorCell) {
+
+        //self.event_loop.execute()
+        match message {
+            RpcActorMsg::Set(light_control) => {
+                let props = Props::new(Arc::new(RpcReqActor::new),
+                                       (self.ser_tx_actor.clone(), self.msg_bus.clone(),
+                                       self.event_loop.clone()));
+                let req_actor = context.actor_of(props, "req_1".to_owned());
+                info!("RpcActor received a message");
+                context.tell(req_actor.unwrap(), RpcReqActorMsg::Set(
+                    context.sender().clone(), light_control.clone()));
+            },
+            RpcActorMsg::SetReliable(light_control) => {
+                let props = Props::new(Arc::new(RpcReqActor::new),
+                                       (self.ser_tx_actor.clone(), self.msg_bus.clone(),
+                                        self.event_loop.clone()));
+                let req_actor = context.actor_of(props, "req_1".to_owned());
+                info!("RpcActor received a message");
+                context.tell(req_actor.unwrap(), RpcReqActorMsg::SetReliable(
+                    context.sender().clone(), light_control.clone()));
+            },
+            RpcActorMsg::Timeout => {
+                info!("Timeout...");
+
+            },
         }
     }
 }
 
 impl Actor for RpcActor {
-    fn receive(&self, message: Box<Any>, _context: ActorCell) {
-
-        if let Ok(message) = Box::<Any>::downcast::<RpcActorMsg>(message) {
-            match *message {
-                RpcActorMsg::Set(light_control) => {
-                    let props = Props::new(Arc::new(RpcReqActor::new),
-                                           (self.ser_tx_actor.clone(), self.msg_bus.clone()));
-                    let req_actor = _context.actor_of(props, "req_1".to_owned());
-                    info!("RpcActor received a message");
-                    _context.tell(req_actor.unwrap(), RpcReqActorMsg::Set(
-                        _context.sender().clone(), light_control.clone()));
-                },
-                RpcActorMsg::SetReliable(light_control) => {
-                    let props = Props::new(Arc::new(RpcReqActor::new),
-                                           (self.ser_tx_actor.clone(), self.msg_bus.clone()));
-                    let req_actor = _context.actor_of(props, "req_1".to_owned());
-                    info!("RpcActor received a message");
-                    _context.tell(req_actor.unwrap(), RpcReqActorMsg::SetReliable(
-                        _context.sender().clone(), light_control.clone()));
-                },
+    fn receive(&self, msg: Box<Any>, context: ActorCell) {
+        match msg.downcast_ref::<RpcActorMsg>() {
+            Some(rpc_msg) => self.handle_rpc_msg(rpc_msg.clone(), context),
+            None => match msg.downcast_ref::<InsteonMsg>() {
+                Some(insteon_msg) => self.handle_insteon_msg(insteon_msg.clone(), context),
+                None => unreachable!(),
             }
         }
     }

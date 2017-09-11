@@ -13,6 +13,7 @@ mod serial_writer;
 extern crate tokio_serial;
 extern crate tokio_core;
 extern crate tokio_io;
+extern crate tokio_timer;
 extern crate bytes;
 extern crate protobuf;
 extern crate phf;
@@ -108,20 +109,22 @@ fn main() {
     let actor_system = ActorSystem::new("vinsteon_system".to_owned());
     actor_system.spawn_threads(ACTOR_SYSTEM_THREAD_NUM);
 
+
     let ser_tx_props = Props::new(
         Arc::new(SerialWriterActor::new), (writer_arc));
     let ser_tx_actor = actor_system.actor_of(ser_tx_props, "ser_tx".to_owned());
 
     let rpc_props = Props::new(
-        Arc::new(RpcActor::new), (ser_tx_actor.clone(), msg_bus_arc.clone()));
+        Arc::new(RpcActor::new),
+        (ser_tx_actor.clone(), msg_bus_arc.clone(), core.remote()));
     let rpc_actor = actor_system.actor_of(rpc_props, "rpc".to_owned());
 
     let reader_props = Props::new(
         Arc::new(SerialReaderActor::new), ());
 
     let printer = reader.for_each(|s| {
-        info!("Received command: {:?}", s);
         msg_bus_arc.lock().unwrap().broadcast(s);
+        actor_system.tell(rpc_actor.clone(), s);
         Ok(())
     });
 

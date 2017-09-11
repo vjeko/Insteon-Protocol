@@ -6,6 +6,7 @@ import messages_pb2_grpc
 import array
 
 channel = grpc.insecure_channel('localhost:50051')
+#channel = grpc.insecure_channel('controller.local:50051')
 stub = messages_pb2_grpc.VinsteonRPCStub(channel)
 
 binary = bytes([0,
