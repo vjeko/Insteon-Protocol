@@ -38,7 +38,7 @@ pub enum RpcReqActorMsg {
 pub struct RpcReqActor {
     pub ser_tx_actor : ActorRef,
     pub msg_bus      : Arc<Mutex<Bus<InsteonMsg>>>,
-    pub future       : RefCell<Option<ActorRef>>,
+    pub future       : Mutex<Option<ActorRef>>,
     pub event_loop   : Remote,
 }
 
@@ -50,7 +50,7 @@ impl RpcReqActor {
         RpcReqActor {
             ser_tx_actor : ser_tx_actor,
             msg_bus : msg_bus,
-            future : RefCell::new(None),
+            future : Mutex::new(None),
             event_loop: event_loop,
         }
     }
@@ -72,9 +72,8 @@ impl RpcReqActor {
                 info!("RpcReqActor received RpcReqActorMsg::SetReliable");
                 self.send_cmd_reliable(cmd.clone());
 
-                let mut bor = self.future.borrow_mut();
-                *bor = None;
-                //self.future = Some(future.clone());
+                let mut interior = self.future.lock().unwrap();
+                *interior = Some(future.clone());;
                 let local_context = context.clone();
                 thread::spawn(move ||{
                     Timer::default().sleep(Duration::from_secs(1)).wait();
