@@ -7,14 +7,7 @@ use phf;
 #[derive(Copy, Clone)]
 pub enum ActorMsg {
     Level(([u8; 3], u32)),
-    Ping,
 }
-
-#[derive(Copy, Clone)]
-pub enum ReaderActorMsg {
-    Propagate(InsteonMsg),
-}
-
 
 #[derive(Debug)]
 #[derive(Copy, Clone)]

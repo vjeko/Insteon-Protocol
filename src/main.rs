@@ -20,20 +20,17 @@ extern crate phf;
 extern crate grpc;
 extern crate bus;
 extern crate futures;
-extern crate futures_cpupool;
 extern crate tls_api;
 extern crate env_logger;
 
 #[macro_use] extern crate serde_derive;
 extern crate bincode;
-extern crate serde;
 extern crate serde_json;
 extern crate robots;
 
 use robots::actors::{ActorSystem, Props};
 use bus::Bus;
 
-use std::net::{Ipv4Addr, SocketAddrV4};
 use std::str;
 use std::thread;
 use std::time::Duration;
@@ -50,15 +47,11 @@ use tokio_io::AsyncRead;
 use tokio_serial::*;
 
 use futures::stream::Stream;
-use futures_cpupool::CpuPool;
 
-use grpc::Server;
 use rpc::VinsteonRpcImpl;
 use messages_grpc::*;
 use codec::*;
 use serial_writer::SerialWriterActor;
-use serial_writer::SerialReaderActor;
-use rpc::RpcReqActor;
 use rpc::RpcActor;
 
 
@@ -96,8 +89,6 @@ fn setup_serial_port(core: &Core) -> tokio_io::codec::Framed<tokio_serial::Seria
 fn main() {
 
     const ACTOR_SYSTEM_THREAD_NUM : u32 = 4;
-    const GRPC_THREAD_NUM         : usize = 2;
-    static GRPC_ADDRESS           : &'static str = "[::]:50051";
 
     setup_logging();
 
@@ -120,9 +111,6 @@ fn main() {
         Arc::new(RpcActor::new),
         (ser_tx_actor.clone(), msg_bus_arc.clone(), core.remote()));
     let rpc_actor = actor_system.actor_of(rpc_props, "rpc".to_owned());
-
-    let reader_props = Props::new(
-        Arc::new(SerialReaderActor::new), ());
 
     let printer = reader.for_each(|s| {
         msg_bus_arc.lock().unwrap().broadcast(s);
@@ -148,7 +136,7 @@ fn main() {
     thread::spawn(|| {
         let mut devices : HashMap<String, [u8; 3]> = std::collections::HashMap::new();
         devices.insert("".into(), [1,2,3]);
-        println!("{}", serde_json::to_string(&devices).unwrap());
+        //println!("{}", serde_json::to_string(&devices).unwrap());
     });
 
     debug!("Spawning serial port reader thread.");

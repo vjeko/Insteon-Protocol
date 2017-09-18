@@ -1,5 +1,4 @@
 use grpc;
-use codec;
 use bus::Bus;
 
 use std::thread;
@@ -7,38 +6,33 @@ use std::time::Duration;
 use std::fmt::Debug;
 use std::sync::Mutex;
 use std::sync::Arc;
-use std::cell::{RefCell, Cell};
-use std::io;
 use futures::Future;
 
-use tokio_timer::{Timer, Timeout};
-use tokio_core::reactor::{Remote, Handle};
+use tokio_timer::Timer;
+use tokio_core::reactor::{Remote};
 use robots::actors::{ActorContext, ActorRef, ActorSystem, Actor, Any, ActorCell, Props};
 
 use messages_grpc::*;
 use messages::*;
 use insteon_structs::*;
-use codec::LineCodec;
-
 
 #[derive(Clone)]
 pub enum RpcActorMsg {
     Set(LightControl),
     SetReliable(CmdMsg),
-    Timeout,
 }
 
 #[derive(Clone)]
 pub enum RpcReqActorMsg {
     Set(ActorRef, LightControl),
     SetReliable(ActorRef, CmdMsg),
-    //Timeout(ActorRef)
+    Timeout(usize)
 }
 
 pub struct RpcReqActor {
     pub ser_tx_actor : ActorRef,
     pub msg_bus      : Arc<Mutex<Bus<InsteonMsg>>>,
-    pub future       : Mutex<Option<ActorRef>>,
+    pub req          : Mutex<Option<(ActorRef, CmdMsg)>>,
     pub event_loop   : Remote,
 }
 
@@ -50,48 +44,79 @@ impl RpcReqActor {
         RpcReqActor {
             ser_tx_actor : ser_tx_actor,
             msg_bus : msg_bus,
-            future : Mutex::new(None),
+            req : Mutex::new(None),
             event_loop: event_loop,
         }
     }
 
     pub fn handle_insteon_msg(&self, message: InsteonMsg, context: ActorCell) {
         info!("RpcReqActor: Received InsteonMsg: {:?}", message);
+        if let Some((ref future,
+                     CmdMsg{ cmd : Some(CmdMsg_oneof_cmd::lightControl(ref lc)), .. })
+        ) = *self.req.lock().unwrap() {
+            let _device_addr = u32_u8(lc.device);
+            match message {
+                InsteonMsg::StandardMsg {addr_from : _device_addr, ..} => {
+                    info!("Received the ACK: {:?}", message);
+                    context.complete(future.clone(), Ack::new());
+                    info!("Killing myself...");
+                    context.kill_me();
+                },
+                _ => (),
+            }
+        }
     }
 
     pub fn handle_rpc_msg(&self, message: RpcReqActorMsg, context: ActorCell) {
         match message {
             RpcReqActorMsg::Set(ref future, ref light_control) => {
                 info!("RpcReqActor received RpcReqActorMsg::Set");
-                self.ser_tx_actor.tell_to(
-                    self.ser_tx_actor.clone(),
+                self.ser_tx_actor.tell_to(self.ser_tx_actor.clone(),
                     ActorMsg::Level((u32_u8(light_control.device), light_control.level)));
                 context.complete(future.clone(), Ack::new());
             },
             RpcReqActorMsg::SetReliable(ref future, ref cmd) => {
                 info!("RpcReqActor received RpcReqActorMsg::SetReliable");
-                self.send_cmd_reliable(cmd.clone());
+                self.send_cmd_once(cmd.clone());
 
-                let mut interior = self.future.lock().unwrap();
-                *interior = Some(future.clone());;
-                let local_context = context.clone();
+                let mut interior = self.req.lock().unwrap();
+                *interior = Some((future.clone(), cmd.clone()));;
+
+                let actor_ref = context.actor_ref().clone();
                 thread::spawn(move ||{
-                    Timer::default().sleep(Duration::from_secs(1)).wait();
-                    local_context.tell(local_context.actor_ref(), RpcActorMsg::Timeout);
+                    Timer::default().sleep(Duration::from_secs(1))
+                        .wait().expect("Unable to sleep.");;
+                    actor_ref.tell_to(actor_ref.clone(), RpcReqActorMsg::Timeout(0));
                 });
+            },
+            RpcReqActorMsg::Timeout(SEND_RETRIES) => {
+                info!("Reached the maximum number of retries, giving up...");
+                info!("Killing myself...", );
+                context.kill_me();
+            },
 
-
-                context.complete(future.clone(), Ack::new());
+            RpcReqActorMsg::Timeout(retries) => {
+                info!("Retrying...");
+                if let Some((_, ref cmd)) = *self.req.lock().unwrap() {
+                    self.send_cmd_once(cmd.clone());
+                    let actor_ref = context.actor_ref().clone();
+                    thread::spawn(move ||{
+                        Timer::default().sleep(Duration::from_secs(ACK_WAIT_INTERVAL_SEC))
+                            .wait().expect("Unable to sleep.");
+                        actor_ref.tell_to(actor_ref.clone(), RpcReqActorMsg::Timeout(retries + 1));
+                    });
+                }
             },
         }
     }
 
-    fn send_cmd_reliable(&self, req: CmdMsg) -> Ack {
+    fn send_cmd_once(&self, req: CmdMsg) -> Ack {
         match req.cmd {
             Some(CmdMsg_oneof_cmd::lightControl(light_control)) => {
                 let dst = u32_u8(light_control.device);
-                self.ser_tx_actor.tell_to(self.ser_tx_actor.clone(), ActorMsg::Level(
-                    (u32_u8(light_control.device), light_control.level))); },
+                self.ser_tx_actor.tell_to(self.ser_tx_actor.clone(),
+                                          ActorMsg::Level((dst, light_control.level)));
+            },
 
             _ => error!("Unknown command"),
         };
@@ -111,7 +136,7 @@ impl Actor for RpcReqActor {
             }
         }
 
-        context.kill_me();
+        //context.kill_me();
     }
 }
 
@@ -133,7 +158,7 @@ impl RpcActor {
 
     pub fn handle_insteon_msg(&self, message: InsteonMsg, context: ActorCell) {
         info!("RpcActor: Received InsteonMsg: {:?}", message);
-        for (path, actor) in &context.children() {
+        for (_path, actor) in &context.children() {
             context.tell(actor.clone(), message);
         }
     }
@@ -159,10 +184,6 @@ impl RpcActor {
                 info!("RpcActor received a message");
                 context.tell(req_actor.unwrap(), RpcReqActorMsg::SetReliable(
                     context.sender().clone(), light_control.clone()));
-            },
-            RpcActorMsg::Timeout => {
-                info!("Timeout...");
-
             },
         }
     }
@@ -205,21 +226,21 @@ fn u32_u8(x:u32) -> [u8; 3] {
     [b2, b3, b4]
 }
 
-pub const WAIT_ACK_RETRIES :usize = 3;
-pub const SEND_RETRIES :usize = 10;
+pub const ACK_WAIT_INTERVAL_SEC : u64 = 1;
+pub const SEND_RETRIES : usize = 8;
 
 impl VinsteonRPC for VinsteonRpcImpl {
 
     fn send_cmd(&self, _m: grpc::RequestOptions, req: CmdMsg) -> grpc::SingleResponse<Ack> {
 
-        let response = Ack::new();
+        let mut response = Ack::new();
 
         match req.cmd {
             Some(CmdMsg_oneof_cmd::lightControl(light_control)) => {
                 let future = self.actor_system.ask(
                     self.rpc_actor.clone(),
                     RpcActorMsg::Set(light_control.clone()), "req_1".to_owned());
-                let response: Ack = self.actor_system.extract_result(future);
+                response = self.actor_system.extract_result(future);
             }
             _ => error!("Unknown command"),
         }
@@ -228,12 +249,10 @@ impl VinsteonRPC for VinsteonRpcImpl {
     }
 
     fn send_cmd_reliable(&self, _m: grpc::RequestOptions, req: CmdMsg) -> grpc::SingleResponse<Ack> {
-        let response = Ack::new();
-
         let future = self.actor_system.ask(
             self.rpc_actor.clone(),
             RpcActorMsg::SetReliable(req.clone()), "req_1".to_owned());
-        let response: Ack = self.actor_system.extract_result(future);
+        let response = self.actor_system.extract_result(future);
 
         grpc::SingleResponse::completed(response)
     }

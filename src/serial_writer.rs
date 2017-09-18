@@ -4,7 +4,6 @@ extern crate tokio_io;
 use robots::actors::{Actor, ActorCell};
 use bincode::{serialize, Infinite};
 
-use std::str;
 use std::any::Any;
 use std::sync::Mutex;
 use std::sync::Arc;
@@ -14,25 +13,6 @@ use futures::stream::SplitSink;
 
 use insteon_structs::*;
 use codec::*;
-
-pub struct SerialReaderActor {}
-
-impl Actor for SerialReaderActor {
-    fn receive(&self, message: Box<Any>, _context: ActorCell) {
-        if let Ok(message) = Box::<Any>::downcast::<ReaderActorMsg>(message) {
-            match *message {
-                ReaderActorMsg::Propagate(data) => {}
-            }
-        }
-    }
-}
-
-impl SerialReaderActor {
-    pub fn new(_ : ()) -> SerialReaderActor {
-        SerialReaderActor {}
-    }
-}
-
 
 pub struct SerialWriterActor {
     writer_arc : Arc<Mutex<SplitSink<tokio_io::codec::Framed<tokio_serial::Serial, LineCodec>>>>,
@@ -68,10 +48,6 @@ impl Actor for SerialWriterActor {
                     let mut exclusive_writer = shared_writer.lock().unwrap();
                     exclusive_writer.start_send(encoded_msg).unwrap();
                     exclusive_writer.poll_complete().unwrap();
-                }
-
-                ActorMsg::Ping => {
-                    info!("Received a ping...")
                 }
             }
         }
