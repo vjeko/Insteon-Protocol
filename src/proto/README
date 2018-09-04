@@ -1,0 +1,8 @@
+GO Compilation
+===========================
+1) Compile the Proto file:
+     protoc  --go_out=plugins=grpc:. messages.proto
+2) Cross-compile the actual client:
+     env GOOS=linux GOARCH=mipsle go build client.go
+3) Run the client:
+     ./client controller.local 1A D0 F4 60
