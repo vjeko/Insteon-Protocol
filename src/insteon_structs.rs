@@ -112,6 +112,35 @@ pub fn u8_command(cmd: Command) -> u8 {
     cmd as u8
 }
 
+#[allow(dead_code)]
+#[derive(Copy, Clone)]
+pub enum Flags {
+}
+
+#[allow(dead_code)]
+impl Flags {
+    pub const DIRECT_MSG :u8 = 0b000_0_00_00;
+    pub const DIRECT_MSG_ACK :u8 = 0b001_0_00_00;
+    pub const DIRECT_MSG_NACK :u8 = 0b101_0_00_00;
+    pub const GROUP_BROADCAST_MSG :u8 = 0b110_0_00_00;
+    pub const GROUP_CLEANUP_BROADCAST_MSG:u8 = 0b010_0_00_00;
+    pub const GROUP_CLEANUP_BROADCAST_MSG_ACK :u8 = 0b011_0_00_00;
+    pub const GROUP_CLEANUP_BROADCAST_MSG_NACK :u8 = 0b111_0_00_00;
+
+    pub const STANDARD_MSG :u8 = 0b000_0_00_00;
+    pub const EXTENDED_MSG :u8 = 0b000_1_00_00;
+
+    pub const MSG_REMAINING_0 :u8 = 0b000_0_00_00;
+    pub const MSG_REMAINING_1 :u8 = 0b000_0_01_00;
+    pub const MSG_REMAINING_2 :u8 = 0b000_0_10_00;
+    pub const MSG_REMAINING_3 :u8 = 0b000_0_11_00;
+
+    pub const DO_NOT_RETRAINSMIT :u8 = 0b000_0_00_00;
+    pub const RETRANSMIT_1 :u8 = 0b000_0_00_01;
+    pub const RETRANSMIT_2 :u8 = 0b000_0_00_10;
+    pub const RETRANSMIT_3 :u8 = 0b000_0_00_11;
+}
+
 pub const DISCRIMINANT_SIZE : usize = 4;
 
 pub const MSG_BEGIN :u8 = 0x02;
@@ -126,7 +155,6 @@ pub const _ALL_LINK_CLEANUP_FAILURE_REPORT :u8 = 0x56;
 pub const _ALL_LINK_RECORD_RESPONSE :u8 = 0x57;
 pub const _ALL_LINK_CLEANUP_STATUS_REPORT :u8 = 0x58;
 pub const SEND_STANDARD_MSG :u8 = 0x62;
-
 
 static SIZE_MAP: phf::Map<u8, usize> = phf_map!(
     0x50u8 => 9,

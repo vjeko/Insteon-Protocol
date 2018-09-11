@@ -32,7 +32,8 @@ impl Actor for SerialWriterActor {
 
                     let msg = InsteonMsg::SendStandardMsg{
                         addr_to : device,
-                        msg_flags : 15,
+                        msg_flags : Flags::DIRECT_MSG | Flags::STANDARD_MSG |
+                                    Flags::MSG_REMAINING_3 | Flags::RETRANSMIT_3,
                         cmd1 : u8_command(Command::On),
                         cmd2 : brightness
                     };

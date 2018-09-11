@@ -25,7 +25,6 @@ extern crate env_logger;
 
 #[macro_use] extern crate serde_derive;
 extern crate bincode;
-extern crate serde_json;
 extern crate robots;
 
 use robots::actors::{ActorSystem, Props};
