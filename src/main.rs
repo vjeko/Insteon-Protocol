@@ -43,7 +43,6 @@ use env_logger::LogBuilder;
 
 use tokio_core::reactor::Core;
 
-use tokio_io::AsyncRead;
 use tokio_serial::*;
 
 use futures::stream::Stream;
@@ -64,8 +63,7 @@ fn setup_logging() {
     builder.init().unwrap();
 }
 
-fn setup_serial_port(core: &Core) -> tokio_codec::Framed<tokio_serial::Serial, LineCodec> {
-    let handle = core.handle();
+fn setup_serial_port() -> tokio_codec::Framed<tokio_serial::Serial, LineCodec> {
     const DEFAULT_TTY_PATH: &str = "/dev/ttyUSB0";
 
     let settings = SerialPortSettings {
@@ -93,7 +91,7 @@ fn main() {
     setup_logging();
 
     let mut core = Core::new().unwrap();
-    let serial = setup_serial_port(&core);
+    let serial = setup_serial_port();
     let (writer, reader) = serial.split();
 
     let writer_arc = Arc::new(Mutex::new(writer));

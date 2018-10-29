@@ -8,8 +8,8 @@ use std::sync::Mutex;
 use std::sync::Arc;
 use futures::Future;
 
-use tokio_timer::Timer;
-use tokio_core::reactor::{Remote};
+use tokio_timer::sleep;
+use tokio_core::reactor::Remote;
 use robots::actors::{ActorContext, ActorRef, ActorSystem, Actor, Any, ActorCell, Props};
 
 use messages_grpc::*;
@@ -84,7 +84,7 @@ impl RpcReqActor {
 
                 let actor_ref = context.actor_ref().clone();
                 thread::spawn(move ||{
-                    Timer::default().sleep(Duration::from_secs(1))
+                    sleep(Duration::from_secs(1))
                         .wait().expect("Unable to sleep.");;
                     actor_ref.tell_to(actor_ref.clone(), RpcReqActorMsg::Timeout(0));
                 });
@@ -101,7 +101,7 @@ impl RpcReqActor {
                     self.send_cmd_once(cmd.clone());
                     let actor_ref = context.actor_ref().clone();
                     thread::spawn(move ||{
-                        Timer::default().sleep(Duration::from_secs(ACK_WAIT_INTERVAL_SEC))
+                        sleep(Duration::from_secs(ACK_WAIT_INTERVAL_SEC))
                             .wait().expect("Unable to sleep.");
                         actor_ref.tell_to(actor_ref.clone(), RpcReqActorMsg::Timeout(retries + 1));
                     });
