@@ -5,10 +5,12 @@ authors = ["vjeko"]
 
 [dependencies]
 num = "0.1"
-tokio-serial = "0.5"
+tokio-serial = "3.0"
 tokio-core = "0.1"
 tokio-io = "0.1"
+tokio-codec = "0.1"
 tokio-timer = "0.1"
+tokio-reactor = "0.1"
 bytes = "0.4"
 grpc = "0.2.1"
 protobuf = "1.4.1"

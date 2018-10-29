@@ -1,4 +1,4 @@
-#![feature(advanced_slice_patterns, slice_patterns)]
+#![feature(slice_patterns)]
 #![feature(plugin)]
 #![plugin(phf_macros)]
 
@@ -14,6 +14,7 @@ extern crate tokio_serial;
 extern crate tokio_core;
 extern crate tokio_io;
 extern crate tokio_timer;
+extern crate tokio_codec;
 extern crate bytes;
 extern crate protobuf;
 extern crate phf;
@@ -63,12 +64,12 @@ fn setup_logging() {
     builder.init().unwrap();
 }
 
-fn setup_serial_port(core: &Core) -> tokio_io::codec::Framed<tokio_serial::Serial, LineCodec> {
+fn setup_serial_port(core: &Core) -> tokio_codec::Framed<tokio_serial::Serial, LineCodec> {
     let handle = core.handle();
     const DEFAULT_TTY_PATH: &str = "/dev/ttyUSB0";
 
     let settings = SerialPortSettings {
-        baud_rate: BaudRate::Baud19200,
+        baud_rate: 19200,
         data_bits: DataBits::Eight,
         flow_control: FlowControl::None,
         parity: Parity::None,
@@ -77,11 +78,11 @@ fn setup_serial_port(core: &Core) -> tokio_io::codec::Framed<tokio_serial::Seria
     };
 
     info!("Connecting to the serial port...");
-    let mut port = tokio_serial::Serial::from_path(DEFAULT_TTY_PATH, &settings, &handle).unwrap();
+    let mut port = tokio_serial::Serial::from_path(DEFAULT_TTY_PATH, &settings).unwrap();
     port.set_exclusive(false).expect("Unable to set serial port exclusive");
     info!("... done.");
 
-    port.framed(LineCodec)
+    tokio_codec::Decoder::framed(LineCodec, port)
 }
 
 
@@ -103,7 +104,7 @@ fn main() {
 
 
     let ser_tx_props = Props::new(
-        Arc::new(SerialWriterActor::new), (writer_arc));
+        Arc::new(SerialWriterActor::new), writer_arc);
     let ser_tx_actor = actor_system.actor_of(ser_tx_props, "ser_tx".to_owned());
 
     let rpc_props = Props::new(

@@ -1,5 +1,6 @@
 extern crate tokio_serial;
 extern crate tokio_io;
+extern crate tokio_codec;
 
 use robots::actors::{Actor, ActorCell};
 use bincode::{serialize, Infinite};
@@ -15,7 +16,7 @@ use insteon_structs::*;
 use codec::*;
 
 pub struct SerialWriterActor {
-    writer_arc : Arc<Mutex<SplitSink<tokio_io::codec::Framed<tokio_serial::Serial, LineCodec>>>>,
+    writer_arc : Arc<Mutex<SplitSink<tokio_codec::Framed<tokio_serial::Serial, LineCodec>>>>,
 }
 
 impl Actor for SerialWriterActor {
@@ -57,7 +58,7 @@ impl Actor for SerialWriterActor {
 
 impl SerialWriterActor {
     pub fn new(writer_arc :
-        Arc<Mutex<SplitSink<tokio_io::codec::Framed<tokio_serial::Serial, LineCodec>>>>,
+        Arc<Mutex<SplitSink<tokio_codec::Framed<tokio_serial::Serial, LineCodec>>>>,
     ) -> SerialWriterActor {
 
         SerialWriterActor{
